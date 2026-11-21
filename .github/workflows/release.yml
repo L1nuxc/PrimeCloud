@@ -9,6 +9,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Inno Setup
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path -LiteralPath $compiler)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (!(Test-Path -LiteralPath $compiler)) { throw "ISCC.exe not found" }
+          "INNO_COMPILER=$compiler" >> $env:GITHUB_ENV
       - run: |
           $version = (cargo metadata --format-version 1 --no-deps | ConvertFrom-Json).packages[0].version
           if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "Release version mismatch" }
@@ -16,6 +25,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item target/release/primecloud.exe PrimeCloud.exe
           ./scripts/test-windows-startup.ps1 ./PrimeCloud.exe
-          gh release create $env:GITHUB_REF_NAME PrimeCloud.exe --verify-tag --title "PrimeCloud $version" --generate-notes
+          & $env:INNO_COMPILER "/DAppVersion=$version" installer/PrimeCloud.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/test-windows-installer.ps1 ./target/installer/PrimeCloud-Setup.exe ./PrimeCloud.exe
+          gh release create $env:GITHUB_REF_NAME "target/installer/PrimeCloud-Setup.exe#Установщик для Windows" "PrimeCloud.exe#Файл для автообновления" --verify-tag --title "PrimeCloud $version" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
