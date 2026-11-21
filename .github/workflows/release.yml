@@ -1,0 +1,20 @@
+name: Windows release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          $version = (cargo metadata --format-version 1 --no-deps | ConvertFrom-Json).packages[0].version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "Release version mismatch" }
+          cargo build --locked --release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item target/release/primecloud.exe PrimeCloud.exe
+          gh release create $env:GITHUB_REF_NAME PrimeCloud.exe --verify-tag --title "PrimeCloud $version" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
