@@ -2,11 +2,15 @@
 import json
 import os
 import re
+import time
+from urllib.error import HTTPError
+from public_soundcloud import find as public_soundcloud
 from html.parser import HTMLParser
 from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 HITMO = "https://ru.hitmoz.org"
+hitmo_retry_at = 0
 def normalize(value):
     return " ".join(re.findall(r"\w+", value.casefold().replace("ё","е")))
 
@@ -60,7 +64,8 @@ def hitmo(track):
 
 def soundcloud(track):
     token=os.environ.get("SOUNDCLOUD_ACCESS_TOKEN")
-    if not token: return
+    if not token:
+        return public_soundcloud(track)
     def request(path):
         req=Request("https://api.soundcloud.com"+path,headers={"Authorization":"OAuth "+token})
         with urlopen(req,timeout=6) as response: return json.load(response)
@@ -78,10 +83,17 @@ def soundcloud(track):
                 return {"source":"SoundCloud · "+row["user"]["username"],"url":stream,"permalink":row["permalink_url"]}
 
 def resolve(track):
-    from urllib.error import URLError
+    global hitmo_retry_at
     for provider in (hitmo,soundcloud):
+        if provider is hitmo and time.monotonic() < hitmo_retry_at:
+            continue
         try:
             result=provider(track)
             if result: return result
-        except (OSError,URLError,ValueError,KeyError):
+        except HTTPError as err:
+            if provider is hitmo and err.code == 403:
+                hitmo_retry_at = time.monotonic() + 300
+            print("Music source", provider.__name__, "HTTP", err.code, flush=True)
+        except (OSError,ValueError,KeyError) as err:
+            print("Music source", provider.__name__, type(err).__name__, flush=True)
             continue

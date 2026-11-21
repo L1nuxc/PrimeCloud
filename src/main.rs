@@ -18,6 +18,13 @@ use windows::{
 mod update;
 
 const API: &str = "https://primecloud.pigboss.xyz";
+fn stream_player(url: &str) -> windows::core::Result<MediaPlayer> {
+    let uri = Uri::CreateUri(&HSTRING::from(url))?;
+    let source = MediaSource::CreateFromUri(&uri)?;
+    let player = MediaPlayer::new()?;
+    player.SetSource(&source)?;
+    Ok(player)
+}
 type Failure = Box<dyn std::error::Error>;
 enum PlayerEvent {
     SignedIn,
@@ -255,10 +262,7 @@ impl Player {
     }
     fn listen(&self, url: &str, label: &str) {
         let result = (|| -> windows::core::Result<()> {
-            let uri = Uri::CreateUri(&HSTRING::from(url))?;
-            let source = MediaSource::CreateFromUri(&uri)?;
-            let player = MediaPlayer::new()?;
-            player.SetSource(&source)?;
+            let player = stream_player(url)?;
             player.Play()?;
             if let Some(old) = self.media.replace(Some(player)) {
                 let _ = old.Close();
@@ -280,6 +284,35 @@ impl Player {
         if let Some(p) = self.media.borrow().as_ref() {
             let _ = p.Play();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    #[ignore = "Requires a fresh full-track URL and a Windows audio device"]
+    fn full_recording_plays_on_windows() {
+        let player = stream_player(&std::env::var("PRIMECLOUD_TEST_AUDIO").unwrap()).unwrap();
+        player.SetIsMuted(true).unwrap();
+        player.Play().unwrap();
+        let session = player.PlaybackSession().unwrap();
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(35) {
+            let position = session.Position().unwrap().Duration;
+            let duration = session.NaturalDuration().unwrap().Duration;
+            if position > 12_000_000 && duration > 600_000_000 {
+                println!(
+                    "Windows playback {:.1} s / {:.1} s",
+                    position as f64 / 1e7,
+                    duration as f64 / 1e7
+                );
+                player.Close().unwrap();
+                return;
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
+        panic!("Playback did not advance through the full recording");
     }
 }
 fn main() {
